@@ -10,8 +10,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: MinTic Checkout and download repository
-        uses: actions/checkout@v3
+      - name: MinTic Checkout
+        uses: actions/checkout@v4
 
       - name: MinTic Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -23,5 +23,6 @@ jobs:
       - name: MinTic Deploy CloudFormation stack
         run: |
           aws cloudformation deploy \
+            --stack-name MiPrimerStackConGITHUB \
             --template-file template.yml \
-            --stack-name MiPrimerStackConGITHUB
+            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM

@@ -24,4 +24,32 @@ jobs:
       run: |
         aws cloudformation deploy \
           --template-file template.yml \
-          --stack-name MiPrimerStackConGITHUB \
+          --stack-name MiPrimerStackConGITHUB
+
+    - name: Check if S3 bucket exists
+      id: check-bucket
+      run: |
+        if aws s3 ls s3://mintic-bucket-680578888516-us-east-1 2>/dev/null; then
+          echo "exists=true" >> $GITHUB_OUTPUT
+          echo "El bucket ya existe, omitiendo creación"
+        else
+          echo "exists=false" >> $GITHUB_OUTPUT
+          echo "El bucket no existe, se procederá a crear"
+        fi
+
+    - name: Deploy S3
+      if: steps.check-bucket.outputs.exists == 'false'
+      run: aws cloudformation deploy --template-file templates/s3.yml --stack-name MinTicS3
+
+    - name: Deploy EC2 Web (S3 App)
+      run: |
+        aws cloudformation deploy \
+          --template-file templates/ec2-web.yml \
+          --stack-name MinTicEC2WebStack \
+          --capabilities CAPABILITY_IAM
+        
+        echo "Obteniendo IP pública de la instancia..."
+        aws cloudformation describe-stacks \
+          --stack-name MinTicEC2WebStack \
+          --query "Stacks[0].Outputs[?OutputKey=='PublicIP'].OutputValue" \
+          --output text

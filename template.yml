@@ -19,13 +19,13 @@ Parameters:
   MinticS3Bucket:
     Description: Bucket S3 que contiene el proyecto
     Type: String
-    Default: mintic-bucket-680578888516-us-east-1
+    Default: mintic-bucket-324563591120-us-east-1
 
   # Nombre del archivo ZIP
   MinticProjectZip:
     Description: Nombre del archivo ZIP del proyecto
     Type: String
-    Default: proyecto.zip
+    Default: project.zip
 
 Resources:
 

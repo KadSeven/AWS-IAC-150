@@ -3,7 +3,7 @@ Resources:
   S3Bucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub 'mintic-bucket-${AWS::AccountId}-${AWS::Region}'
+      BucketName: mintic-bucket-324563591120-us-east-1
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true

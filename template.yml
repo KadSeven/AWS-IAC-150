@@ -1,0 +1,267 @@
+# Plantilla CloudFormation para arquitectura Mintic con VPC, EC2, ASG y ALB
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Arquitectura Mintic con VPC, 2 AZ, 2 Subnets Públicas, 2 EC2 estáticas, 4 EC2 en ASG y ALB con GatewayInternet
+
+Parameters:
+  # Parámetro para definir el nombre del par de claves SSH
+  MinticKeyName:
+    Description: Nombre del par de claves SSH
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: ssh-iac-mintic-ec2
+
+  # Parámetro para definir la AMI que usarán las instancias EC2
+  MinticAmiId:
+    Description: AMI para las instancias EC2
+    Type: String
+    Default: ami-0f88e80871fd81e91
+
+Resources:
+
+  # VPC principal para alojar todos los recursos
+  MinticVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: MinticVPC
+
+  # Gateway de Internet para permitir acceso externo
+  MinticInternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  # Asociación del IGW con la VPC
+  MinticAttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref MinticVPC
+      InternetGatewayId: !Ref MinticInternetGateway
+
+  # Subred pública en la zona us-east-1a
+  MinticPublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MinticVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: us-east-1a
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: MinticPublicSubnet1
+
+  # Subred pública en la zona us-east-1b
+  MinticPublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MinticVPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: us-east-1b
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: MinticPublicSubnet2
+
+  # Tabla de rutas para las subredes públicas
+  MinticRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MinticVPC
+
+  # Ruta predeterminada hacia el IGW
+  MinticPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: MinticAttachGateway
+    Properties:
+      RouteTableId: !Ref MinticRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref MinticInternetGateway
+
+  # Asociación de tabla de rutas con subred 1
+  MinticSubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref MinticPublicSubnet1
+      RouteTableId: !Ref MinticRouteTable
+
+  # Asociación de tabla de rutas con subred 2
+  MinticSubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref MinticPublicSubnet2
+      RouteTableId: !Ref MinticRouteTable
+
+  # Grupo de seguridad que permite tráfico HTTP y SSH desde cualquier lugar
+  MinticSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Acceso HTTP y SSH desde cualquier lugar
+      VpcId: !Ref MinticVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+  # Instancia EC2 estática en AZ1 con UserData
+  MinticEC2AZ1:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref MinticAmiId
+      InstanceType: t2.micro
+      KeyName: !Ref MinticKeyName
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          SubnetId: !Ref MinticPublicSubnet1
+          DeviceIndex: 0
+          GroupSet:
+            - !Ref MinticSecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          yum update -y
+          yum install -y httpd
+          systemctl start httpd
+          systemctl enable httpd
+          echo "<html><body><h1>Hola desde EC2 AZ1 - IP: $(hostname -f)</h1></body></html>" > /var/www/html/index.html
+
+  # Instancia EC2 estática en AZ2 con UserData
+  MinticEC2AZ2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref MinticAmiId
+      InstanceType: t2.micro
+      KeyName: !Ref MinticKeyName
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          SubnetId: !Ref MinticPublicSubnet2
+          DeviceIndex: 0
+          GroupSet:
+            - !Ref MinticSecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          yum update -y
+          yum install -y httpd
+          systemctl start httpd
+          systemctl enable httpd
+          echo "<html><body><h1>Hola desde EC2 AZ2 - IP: $(hostname -f)</h1></body></html>" > /var/www/html/index.html
+
+  # Application Load Balancer (ALB) público
+  MinticALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: MinticALB
+      Subnets:
+        - !Ref MinticPublicSubnet1
+        - !Ref MinticPublicSubnet2
+      SecurityGroups:
+        - !Ref MinticSecurityGroup
+      Scheme: internet-facing
+      Type: application
+
+  # Target group para el ALB
+  MinticTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref MinticVPC
+      Protocol: HTTP
+      Port: 80
+      TargetType: instance
+      HealthCheckPath: /
+
+  # Listener del ALB en el puerto 80
+  MinticListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref MinticALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref MinticTargetGroup
+
+  # Plantilla de lanzamiento para el Auto Scaling Group
+  MinticLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        ImageId: !Ref MinticAmiId
+        InstanceType: t2.micro
+        KeyName: !Ref MinticKeyName
+        SecurityGroupIds:
+          - !Ref MinticSecurityGroup
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            yum update -y
+            yum install -y httpd
+            systemctl start httpd
+            systemctl enable httpd
+            echo "<html><body><h1>¡Hola desde CloudFormation!</h1></body></html>" > /var/www/html/index.html
+
+  # Auto Scaling Group con 4 instancias distribuidas en 2 AZ
+  MinticASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier:
+        - !Ref MinticPublicSubnet1
+        - !Ref MinticPublicSubnet2
+      LaunchTemplate:
+        LaunchTemplateId: !Ref MinticLaunchTemplate
+        Version: !GetAtt MinticLaunchTemplate.LatestVersionNumber
+      MinSize: '4'
+      MaxSize: '4'
+      DesiredCapacity: '4'
+      TargetGroupARNs:
+        - !Ref MinticTargetGroup
+
+  # Apaga todas las instancias del ASG a las 8:00 AM hora Colombia (13:00 UTC)
+  MinticASGStopSchedule:
+    Type: AWS::AutoScaling::ScheduledAction
+    Properties:
+      AutoScalingGroupName: !Ref MinticASG
+      DesiredCapacity: 0
+      Recurrence: "0 13 * * *"   # 8:00 AM Colombia
+
+  # Enciende todas las instancias del ASG a las 8:15 AM hora Colombia (13:15 UTC)
+  MinticASGStartSchedule:
+    Type: AWS::AutoScaling::ScheduledAction
+    Properties:
+      AutoScalingGroupName: !Ref MinticASG
+      DesiredCapacity: 4
+      Recurrence: "15 13 * * *"  # 8:15 AM Colombia
+
+  # Warm pool para mantener 2 instancias "listas" pero detenidas
+  MinticWarmPool:
+    Type: AWS::AutoScaling::WarmPool
+    Properties:
+      AutoScalingGroupName: !Ref MinticASG
+      PoolState: Stopped  # Las instancias estarán en estado detenido
+      MinSize: 2          # Mantiene 2 instancias en el warm pool
+
+Outputs:
+  # ID de la VPC creada
+  MinticVPCId:
+    Value: !Ref MinticVPC
+    Description: ID de la VPC
+
+  # IP pública de la EC2 en AZ1
+  MinticEC2AZ1PublicIP:
+    Value: !GetAtt MinticEC2AZ1.PublicIp
+    Description: IP pública de la instancia EC2 en AZ1
+
+  # IP pública de la EC2 en AZ2
+  MinticEC2AZ2PublicIP:
+    Value: !GetAtt MinticEC2AZ2.PublicIp
+    Description: IP pública de la instancia EC2 en AZ2
+
+  # DNS del Application Load Balancer
+  MinticALBDNS:
+    Value: !GetAtt MinticALB.DNSName
+    Description: DNS del Application Load Balancer

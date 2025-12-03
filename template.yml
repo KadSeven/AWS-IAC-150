@@ -7,7 +7,7 @@ Parameters:
   MinticKeyName:
     Description: Nombre del par de claves SSH
     Type: AWS::EC2::KeyPair::KeyName
-    Default: ssh-iac-mintic-ec2
+    Default: KeyNew
 
   # Parámetro para definir la AMI que usarán las instancias EC2
   MinticAmiId:
@@ -15,7 +15,26 @@ Parameters:
     Type: String
     Default: ami-0f88e80871fd81e91
 
+  # Bucket S3 con el proyecto
+  MinticS3Bucket:
+    Description: Bucket S3 que contiene el proyecto
+    Type: String
+    Default: mintic-bucket-680578888516-us-east-1
+
+  # Nombre del archivo ZIP
+  MinticProjectZip:
+    Description: Nombre del archivo ZIP del proyecto
+    Type: String
+    Default: proyecto.zip
+
 Resources:
+
+  # Instance Profile para asociar el rol existente a las instancias
+  MinticInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - Despliegue_EC2
 
   # VPC principal para alojar todos los recursos
   MinticVPC:
@@ -115,6 +134,7 @@ Resources:
       ImageId: !Ref MinticAmiId
       InstanceType: t3.micro
       KeyName: !Ref MinticKeyName
+      IamInstanceProfile: !Ref MinticInstanceProfile
       NetworkInterfaces:
         - AssociatePublicIpAddress: true
           SubnetId: !Ref MinticPublicSubnet1
@@ -125,10 +145,23 @@ Resources:
         Fn::Base64: !Sub |
           #!/bin/bash
           yum update -y
-          yum install -y httpd
+          yum install -y httpd aws-cli unzip
           systemctl start httpd
           systemctl enable httpd
-          echo "<html><body><h1>Hola desde EC2 AZ1 - IP: $(hostname -f)</h1></body></html>" > /var/www/html/index.html
+          
+          # Descargar proyecto desde S3
+          aws s3 cp s3://${MinticS3Bucket}/${MinticProjectZip} /tmp/${MinticProjectZip}
+          
+          if [ -f /tmp/${MinticProjectZip} ]; then
+            unzip -o /tmp/${MinticProjectZip} -d /var/www/html/
+            chown -R apache:apache /var/www/html/
+            chmod -R 755 /var/www/html/
+            rm -f /tmp/${MinticProjectZip}
+          else
+            echo "<html><body><h1>Error: No se pudo descargar ${MinticProjectZip} desde AZ1</h1></body></html>" > /var/www/html/index.html
+          fi
+          
+          systemctl restart httpd
 
   # Instancia EC2 estática en AZ2 con UserData
   MinticEC2AZ2:
@@ -137,6 +170,7 @@ Resources:
       ImageId: !Ref MinticAmiId
       InstanceType: t3.micro
       KeyName: !Ref MinticKeyName
+      IamInstanceProfile: !Ref MinticInstanceProfile
       NetworkInterfaces:
         - AssociatePublicIpAddress: true
           SubnetId: !Ref MinticPublicSubnet2
@@ -147,10 +181,23 @@ Resources:
         Fn::Base64: !Sub |
           #!/bin/bash
           yum update -y
-          yum install -y httpd
+          yum install -y httpd aws-cli unzip
           systemctl start httpd
           systemctl enable httpd
-          echo "<html><body><h1>Hola desde EC2 AZ2 - IP: $(hostname -f)</h1></body></html>" > /var/www/html/index.html
+          
+          # Descargar proyecto desde S3
+          aws s3 cp s3://${MinticS3Bucket}/${MinticProjectZip} /tmp/${MinticProjectZip}
+          
+          if [ -f /tmp/${MinticProjectZip} ]; then
+            unzip -o /tmp/${MinticProjectZip} -d /var/www/html/
+            chown -R apache:apache /var/www/html/
+            chmod -R 755 /var/www/html/
+            rm -f /tmp/${MinticProjectZip}
+          else
+            echo "<html><body><h1>Error: No se pudo descargar ${MinticProjectZip} desde AZ2</h1></body></html>" > /var/www/html/index.html
+          fi
+          
+          systemctl restart httpd
 
   # Application Load Balancer (ALB) público
   MinticALB:
@@ -194,16 +241,31 @@ Resources:
         ImageId: !Ref MinticAmiId
         InstanceType: t3.micro
         KeyName: !Ref MinticKeyName
+        IamInstanceProfile:
+          Arn: !GetAtt MinticInstanceProfile.Arn
         SecurityGroupIds:
           - !Ref MinticSecurityGroup
         UserData:
           Fn::Base64: !Sub |
             #!/bin/bash
             yum update -y
-            yum install -y httpd
+            yum install -y httpd aws-cli unzip
             systemctl start httpd
             systemctl enable httpd
-            echo "<html><body><h1>¡Hola desde CloudFormation!</h1></body></html>" > /var/www/html/index.html
+            
+            # Descargar proyecto desde S3
+            aws s3 cp s3://${MinticS3Bucket}/${MinticProjectZip} /tmp/${MinticProjectZip}
+            
+            if [ -f /tmp/${MinticProjectZip} ]; then
+              unzip -o /tmp/${MinticProjectZip} -d /var/www/html/
+              chown -R apache:apache /var/www/html/
+              chmod -R 755 /var/www/html/
+              rm -f /tmp/${MinticProjectZip}
+            else
+              echo "<html><body><h1>Error: No se pudo descargar ${MinticProjectZip} desde ASG</h1></body></html>" > /var/www/html/index.html
+            fi
+            
+            systemctl restart httpd
 
   # Auto Scaling Group con 4 instancias distribuidas en 2 AZ
   MinticASG:
